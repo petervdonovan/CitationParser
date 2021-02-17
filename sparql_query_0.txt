@@ -1,0 +1,21 @@
+PREFIX cito: <http://purl.org/spar/cito/>
+PREFIX dcterms: <http://purl.org/dc/terms/>
+PREFIX datacite: <http://purl.org/spar/datacite/>
+PREFIX literal: <http://www.essepuntato.it/2010/06/literalreification/>
+PREFIX biro: <http://purl.org/spar/biro/>
+PREFIX frbr: <http://purl.org/vocab/frbr/core#>
+PREFIX c4o: <http://purl.org/spar/c4o/>
+SELECT ?cited_ref ?citee ?citee_url WHERE {
+	?cito cito:cites ?citee .
+	OPTIONAL { 
+		?cito frbr:part ?ref .
+		?ref biro:references ?citee ;
+			c4o:hasContent ?cited_ref 
+	}
+	OPTIONAL {
+		?citee datacite:hasIdentifier [
+			datacite:usesIdentifierScheme datacite:url ;
+			literal:hasLiteralValue ?citee_url
+		]
+	}
+} LIMIT 100
