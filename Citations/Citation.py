@@ -82,11 +82,11 @@ class Citation(object):
         return [
             Name(
                 surname=parts['surname'], 
-                givenName=parts['givenName'], 
-                middleName=parts['middleName'],
-                givenNameInitials=parts['givenNameInitials'],
-                middleNameInitials=parts['middleNameInitials']
-                ) 
+                givenName=parts['givenName']
+                    + ' '.join(parts['middleName']),
+                givenNameInitials=parts['givenNameInitials']
+                    + parts['middleNameInitials']
+                )
             for parts in namePartses
             if parts['surname']
             ]
