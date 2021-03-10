@@ -56,7 +56,7 @@ class MotifGopher:
         self._saveto = saveto
         self.found_motifs = dict()
         self._name = datetime.datetime.now().strftime(
-            'Gopher_%I_%M%p_%d%b_%Y'
+            'Gopher_%I-%M%p_%d_%b_%Y'
         )
     def _motif(self):
         """Returns a randomly selected substring from the MotifGopher's
@@ -181,28 +181,30 @@ class MotifGopher:
         hunts = []
         num_found = []
         for i in range(n):
-            if i % 1000 = 0:
+            if i % 1000 == 0:
                 print('Hang in there. {}% finished.'.format(100 * i / n))
             self.hunt()
             if i % resolution == 0:
                 hunts.append(i)
                 num_found.append(len(self.found_motifs))
         plt.plot(hunts, num_found)
+        plt.show()
     def run(self, verbose=True):
         """Manages a sequence of operations, with progress reports and
         requests for human input. Manages logging and saving.
         """
-        plot_hunt()
         last_nfound = len(self.found_motifs)
         while True:
-            n = input('How many hunt operations would you like to run? ')
-            plot_hunt(n=n)
+            n = int(input('How many hunt operations would you like to run? '
+                          '(at least 25K recommended.) '))
+            self.plot_hunt(n=n)
             new_nfound = len(self.found_motifs)
             message = (
                 'After {} hunt operations, the number of found motifs has\n'
                 'increased by {} to {}.'.format(
                     n,
-                    new_nfound - last_nfound
+                    new_nfound - last_nfound,
+                    new_nfound
                 )
             )
             self.log(message)
