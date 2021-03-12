@@ -152,13 +152,14 @@ class MotifGopher:
                         print('Deleting "{}" because it was too similar to '
                               '"{}" (similarity: {:.4f})'
                             .format(keys[j], keys[i], corr))
-                        if i % 10 == 0:
-                            print('Searched {}% of the keys...'.format(
-                                100 * i / len(keys)
-                            ))
                     del self.found_motifs[keys[j]]
                     keys.remove(keys[j])
                 j += 1
+            if verbose:
+                if i % 10 == 0:
+                    print('Searched {}% of the keys...'.format(
+                        100 * i / len(keys)
+                    ))
             i += 1
 
     def log(self, message):
@@ -167,11 +168,12 @@ class MotifGopher:
         """
         with open(os.path.join(self._saveto, '.gopherlogs'), 'w') as f:
             f.write('{}: {}\n'.format(self._name, message))
-    def save(self):
+    def save(self, suffix=''):
         """Saves a dictionary of found motifs and their frequencies to a
         pickle file.
         """
-        path = os.path.join(self._saveto, self._name + '_motifs.pickle')
+        path = os.path.join(
+            self._saveto, self._name + '_motifs' + suffix + '.pickle')
         with open(path, 'wb') as dbfile:
             pickle.dump(self.found_motifs, dbfile, pickle.HIGHEST_PROTOCOL)
     def plot_hunt(self, resolution=50, n=25000):
@@ -210,9 +212,18 @@ class MotifGopher:
             self.log(message)
             print(message)
             last_nfound = new_nfound
-            if 'y' in input('Would you like to save and exit? ').lower():
+            if 'y' in input('Would you like to save and stop hunting for '
+                            'motifs? ').lower():
                 break
-        self.save()
+        self.save(suffix='unpurged')
+        if 'y' in input('Would you like to purge motifs that are highly '
+                        'correlated with other motifs of at least the same '
+                        'length?'):
+            self.purge(verbose)
+            print('Saving... ', end='')
+            self.save(suffix='purged')
+            print('Done.')
+
 def correlation(arr1, arr2, padding):
     """Returns the cosine of the angle between ARR1 and ARR2, after
     subjecting one of ARR1 or ARR2 to a displacement (shift) that
