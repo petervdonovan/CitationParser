@@ -58,6 +58,7 @@ class MotifGopher:
         self._name = datetime.datetime.now().strftime(
             'Gopher_%I-%M%p_%d_%b_%Y'
         )
+        self.log(str(self))
     def _motif(self):
         """Returns a randomly selected substring from the MotifGopher's
         private corpus.
@@ -103,27 +104,24 @@ class MotifGopher:
                         return found
                     return None
             sample_size *= r
-    def _get_motif_vecs(self):
-        """Returns a dictionary of logical ndarrays representing the
-        indices of matches in the concatenated group of all texts.
-
-        Note: Uses a lot of space. On the order of millions of integers.
+    def _get_motif_vec(self, motif):
+        """Returns a logical ndarray representing the indices of matches
+        to MOTIF in the concatenated group of all texts.
         """
-        concatenated = ''.join(self._texts)
-        ret = {
-            motif: np.zeros(len(concatenated))
-            for motif in self.found_motifs
-        }
-        for key in ret:
-            idx = concatenated.find(key)
-            while idx != -1:
-                ret[key][idx] = 1
-                idx = concatenated.find(key, idx + 1)
+        if not hasattr(self, '_concatenated'):
+            self._concatenated = ''.join(self._texts)
+        ret = np.zeros(len(self._concatenated))
+        idx = self._concatenated.find(motif)
+        while idx != -1:
+            ret[idx] = 1
+            idx = self._concatenated.find(motif, idx + 1)
         return ret
     def purge(self, verbose=False):
         """Purges the found motifs of excessively correlated pairs;
         includes the longer motif whenever two motifs are excessively
-        correlated. It is recommended to call this method only once,
+        correlated. Ties will be broken rather arbitrarily (but
+        deterministically!) by standard string comparison.
+        It is recommended to call this method only once,
         after collecting a satisfactory number of motifs.
 
         WARNING: The implementation I have right now is what might be
@@ -132,41 +130,40 @@ class MotifGopher:
         the number of found motifs.
         """
         corr_padding = max(len(motif) for motif in self.found_motifs)
-        motif_vecs = self._get_motif_vecs()
-        keys = list(self.found_motifs.keys())
-        keys.sort(key=lambda s: len(s), reverse=True)
-        # Here, while loops are necessary (as opposed to for loops)
-        # because the length of the list changes as items are removed.
-        i = 0
-        while i < len(keys) - 1:
-            j = i + 1
-            while j < len(keys):
-                assert len(keys[i]) >= len(keys[j])
+        purged = dict()
+        for i, key in enumerate(self.found_motifs.keys()):
+            for other_key in self.found_motifs.keys():
+                if key == other_key:
+                    continue
+                if len(key) > len(other_key):
+                    continue
+                if len(key) == len(other_key) and key > other_key:
+                    continue
                 corr = correlation(
-                    motif_vecs[keys[i]],
-                    motif_vecs[keys[j]],
+                    self._get_motif_vec(key),
+                    self._get_motif_vec(other_key),
                     corr_padding
                 )
                 if corr > self._max_corr:
                     if verbose:
                         print('Deleting "{}" because it was too similar to '
                               '"{}" (similarity: {:.4f})'
-                            .format(keys[j], keys[i], corr))
-                    del self.found_motifs[keys[j]]
-                    keys.remove(keys[j])
-                j += 1
+                            .format(key, other_key, corr))
+                    break
+            else:
+                purged[key] = self.found_motifs[key]
             if verbose:
                 if i % 10 == 0:
                     print('Searched {}% of the keys...'.format(
-                        100 * i / len(keys)
+                        100 * i / len(self.found_motifs)
                     ))
-            i += 1
+        self.found_motifs = purged
 
     def log(self, message):
         """Appends MESSAGE to the file .gopherlogs, prefixed with the
         gopher's name.
         """
-        with open(os.path.join(self._saveto, '.gopherlogs'), 'w') as f:
+        with open(os.path.join(self._saveto, '.gopherlogs'), 'a') as f:
             f.write('{}: {}\n'.format(self._name, message))
     def save(self, suffix=''):
         """Saves a dictionary of found motifs and their frequencies to a
@@ -215,14 +212,19 @@ class MotifGopher:
             if 'y' in input('Would you like to save and stop hunting for '
                             'motifs? ').lower():
                 break
-        self.save(suffix='unpurged')
+        self.save(suffix='_unpurged')
         if 'y' in input('Would you like to purge motifs that are highly '
                         'correlated with other motifs of at least the same '
-                        'length?'):
+                        'length? '):
             self.purge(verbose)
             print('Saving... ', end='')
-            self.save(suffix='purged')
+            self.save(suffix='_purged')
             print('Done.')
+    def __str__(self):
+        return ('MotifGopher instance with thresh={}, max_corr={}, '
+                'confidence={}, r={}'.format(
+                    self._thresh, self._max_corr, self._confidence, self._r
+        ))
 
 def correlation(arr1, arr2, padding):
     """Returns the cosine of the angle between ARR1 and ARR2, after
