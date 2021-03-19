@@ -7,6 +7,8 @@ import matplotlib.pyplot as plt
 import pickle
 from scipy import stats
 
+from Utils.algs import memo
+
 class MotifGopher:
     """I wish to pick out common motifs from an (almost) arbitrarily
     long sequence of raw texts, and I wish to finish in a reasonable
@@ -17,7 +19,6 @@ class MotifGopher:
     def __init__(
             self, texts,
             thresh=0.1,
-            max_corr=0.8,
             confidence=0.99,
             r=0.75,
             saveto='./'):
@@ -25,16 +26,12 @@ class MotifGopher:
         its behavior. These parameters ought not to change for a given
         MotifGopher instance.
         TEXTS - The texts to be searched for motifs.
-        THRESH - The minimum frequency of a motif for it to be
-                remembered by the MotifGopher. Frequency is calculated
-                on a per-text basis, meaning that two appearances in a
-                single text do not count for anything more than just one
-                appearance.
-        MAX_CORR - The maximum allowable cosine similarity between two
-                included motifs. Calculated with shifts, in much the
-                same fashion as cross-correlation, with the vectors
-                being binary sequences of match-or-no-match with the
-                motif of interest.
+        THRESH - The minimum mean number of times a motif provides _new_
+            information per citation. If a motif provides no
+            information, then it does not provide _new_ information. If
+            it provides information that _one_ single other, _longer_
+            motif provides, then it does not provide _new_ information.
+            Else, it provides new information!
         CONFIDENCE - The required confidence level for any statistics
                 that affect decisions made by the MotifGopher.
         R - The probability that a subsequent character will be included
@@ -50,11 +47,11 @@ class MotifGopher:
         # it searches for motifs.
         self._texts = ['\n' + text + '\n' for text in texts]
         self._thresh = thresh
-        self._max_corr = max_corr
         self._confidence = confidence
         self._r = r
         self._saveto = saveto
         self.found_motifs = dict()
+        self._rejected_motifs = dict()
         self._name = datetime.datetime.now().strftime(
             'Gopher_%I-%M%p_%d_%b_%Y'
         )
@@ -104,18 +101,104 @@ class MotifGopher:
                         return found
                     return None
             sample_size *= r
-    def _get_motif_vec(self, motif):
+    def _get_motif_vec(self, motif, texts=None):
         """Returns a logical ndarray representing the indices of matches
-        to MOTIF in the concatenated group of all texts.
+        to MOTIF in a concatenated group texts.
+
+        If TEXTS is not set to None, uses the concatenated group of
+        TEXTS; else, uses all texts.
         """
-        if not hasattr(self, '_concatenated'):
-            self._concatenated = ''.join(self._texts)
-        ret = np.zeros(len(self._concatenated))
+        if texts is None:
+            if not hasattr(self, '_concatenated'):
+                self._concatenated = ''.join(self._texts)
+            concatenated = self._concatenated
+        else:
+            concatenated = ''.join(texts)
+        ret = np.zeros(len(concatenated))
         idx = self._concatenated.find(motif)
         while idx != -1:
             ret[idx] = 1
             idx = self._concatenated.find(motif, idx + 1)
         return ret
+    def _provides_information(self, motif0, motif1=None, sample_size=100, r=10):
+        """Returns whether MOTIF provides information at average of at
+        least the threshold number of times per citation.
+        MOTIF0 - the motif that is to be assessed for the information it
+            provides
+        MOTIF1 - (optional) the motif against which MOTIF0 is to be
+            compared for redundancy
+        """
+        p = 1
+        provides_info = False
+        while p > (1 - self._confidence):
+            if sample_size < len(self._texts):
+                texts = random.choices(self._texts, k=sample_size)
+            else:
+                texts = self._texts
+            vec = self._get_motif_vec(motif0, texts)
+            if motif1 is None:
+                successes = np.sum(vec)
+            else:
+                successes = np.not_equal(vec, self._get_motif_vec(motif1))
+            char_thresh = self._get_thresh_by_char(texts)
+            provides_info = successes / len(vec) >= char_thresh
+            p = stats.binom_test(
+                successes,
+                n=len(vec),
+                p=char_thresh
+            ) if texts != self._texts else 0 # p is meaningless if sample=population
+            sample_size *= r
+        return provides_info
+    def _get_thresh_by_char(self, texts):
+        """Returns the minimum number of characters required per text at
+        which new information must be provided in order to meet the
+        threshold stipulated in the constructor. Note: This value is
+        imprecise, and the smaller the TEXTS list is, the
+        more imprecise the output value will be.
+        """
+        return self._thresh / np.average([len(text) for text in texts])
+    @memo
+    def _max_motif_len(self):
+        """Returns the length of the longest found motif."""
+        return max(len(motif) for motif in self.found_motifs)
+    @memo
+    def _get_correlated(key, other_key, sample_size=100, r=10):
+        """Returns whether the two keys have a max cross-correlation
+        that exceeds MAX_CORR. Rate of any error should be approximately 
+        less than (1 - CONFIDENCE) (because a two-tailed test is used,
+        and sample size is increased by a LARGE factor until either the
+        population is sampled or p-value is below (1 - CONFIDENCE)).
+
+        TODO: Potentially do this in a statistically correct way. Here
+        are two issues in the current implementation:
+        * They take the p-value corresponding to the highest correlation
+        from a series of multiple tests, so the p-value is no longer
+        valid. (This problem is analogous to the problem of
+        "p-hacking.")
+        * The samples are modeled as independent samples of individual
+        substring positions, but they obviously are not: Instead, they
+        are cluster samples because substring positions are "clustered"
+        by the text from which they came. This is a huge problem, but it
+        is hard to fix it without making this algorithm unacceptably
+        slow.
+        * With the displacement associated with cross-correlation, the
+        value of n is no longer well-defined.
+        """
+        p = 1
+        excessively_correlated = False
+        while p >= 1 - self._confidence:
+            texts = random.choices(self._texts, k=sample_size)
+            corr = correlation(
+                arr1    = self._get_motif_vec(key, texts),
+                arr2    = self._get_motif_vec(other_key, texts),
+                padding = self._max_motif_len()
+            )
+            excessively_correlated = corr > self._max_corr
+            if excessively_correlated:
+                p = 2 * (1 - dist.cdf(corr))
+            else:
+                p = 2 * dist.cdf(corr)
+
     def purge(self, verbose=False):
         """Purges the found motifs of excessively correlated pairs;
         includes the longer motif whenever two motifs are excessively
@@ -129,7 +212,7 @@ class MotifGopher:
         nineteen. So, it's kind of slow, and it takes quadratic time wrt
         the number of found motifs.
         """
-        corr_padding = max(len(motif) for motif in self.found_motifs)
+        corr_padding = self._max_motif_len()
         purged = dict()
         for i, key in enumerate(self.found_motifs.keys()):
             for other_key in self.found_motifs.keys():
@@ -226,13 +309,17 @@ class MotifGopher:
                     self._thresh, self._max_corr, self._confidence, self._r
         ))
 
+def cross_corr(arr1, arr2, padding):
+    """Returns the max cross correlation of ARR1 and ARR2, with a
+    displacement of magnitude in the interval [0, PADDING]."""
+    return max(np.correlate(np.pad(arr1, padding), arr2))
 def correlation(arr1, arr2, padding):
     """Returns the cosine of the angle between ARR1 and ARR2, after
     subjecting one of ARR1 or ARR2 to a displacement (shift) that
     maximizes its dot product with the other array.
     """
     return (
-        max(np.correlate(np.pad(arr1, padding), arr2))
+        cross_corr(arr1, arr2, padding)
         / ((
               np.sum(arr1)
             * np.sum(arr2)
