@@ -6,6 +6,7 @@ import re
 import matplotlib.pyplot as plt
 import pickle
 from scipy import stats
+import time
 
 from Utils.algs import memo
 
@@ -50,8 +51,8 @@ class MotifGopher:
         self._confidence = confidence
         self._r = r
         self._saveto = saveto
-        self.found_motifs = dict()
-        self._rejected_motifs = dict()
+        self.found_motifs = set()
+        self._rejected_motifs = set()
         self._name = datetime.datetime.now().strftime(
             'Gopher_%I-%M%p_%d_%b_%Y'
         )
@@ -80,30 +81,34 @@ class MotifGopher:
             program output.
         """
         found = self._motif()
-        if found in self.found_motifs:
+        if      (
+                    found in self.found_motifs
+                    or found in self._rejected_motifs
+                    or not self._provides_information(found)
+                ):
+            self._rejected_motifs.add(found)
             return None
-        while True:
-            if (sample_size >= len(self._texts)):
-                sample = self._texts
-                frequency = np.mean([found in text for text in sample])
-                if frequency > self._thresh:
-                    self.found_motifs[found] = frequency
-                    return found
-                return None
-            else:
-                sample = random.choices(self._texts, k=sample_size)
-                count = sum(found in text for text in sample)
-                p = stats.binom_test(count, n=sample_size, p=self._thresh)
-                if p < 1 - self._confidence:
-                    frequency = count / len(sample)
-                    if frequency > self._thresh:
-                        self.found_motifs[found] = frequency
-                        return found
+        to_be_replaced = None
+        for other in self.found_motifs:
+            if not self._provides_information(found, other):
+                if len(other) > len(found):
+                    self._rejected_motifs.add(found)
                     return None
-            sample_size *= r
+                else:
+                    # Note: Ties are broken arbitrarily, depending on
+                    # set iteration order. No promises are made about
+                    # which motif should be kept if two motifs have the
+                    # same length.
+                    to_be_replaced = other
+                    break
+        if to_be_replaced is not None:
+            self.found_motifs.remove(to_be_replaced)
+            self._rejected_motifs.add(to_be_replaced)
+        self.found_motifs.add(found)
+        return found
     def _get_motif_vec(self, motif, texts=None):
         """Returns a logical ndarray representing the indices of matches
-        to MOTIF in a concatenated group texts.
+        to MOTIF in a concatenated group of texts.
 
         If TEXTS is not set to None, uses the concatenated group of
         TEXTS; else, uses all texts.
@@ -115,10 +120,10 @@ class MotifGopher:
         else:
             concatenated = ''.join(texts)
         ret = np.zeros(len(concatenated))
-        idx = self._concatenated.find(motif)
+        idx = concatenated.find(motif)
         while idx != -1:
             ret[idx] = 1
-            idx = self._concatenated.find(motif, idx + 1)
+            idx = concatenated.find(motif, idx + 1)
         return ret
     def _provides_information(self, motif0, motif1=None, sample_size=100, r=10):
         """Returns whether MOTIF provides information at average of at
@@ -139,15 +144,18 @@ class MotifGopher:
             if motif1 is None:
                 successes = np.sum(vec)
             else:
-                successes = np.not_equal(vec, self._get_motif_vec(motif1))
+                successes = np.sum(vec != self._get_motif_vec(motif1, texts))
             char_thresh = self._get_thresh_by_char(texts)
             provides_info = successes / len(vec) >= char_thresh
             p = stats.binom_test(
                 successes,
                 n=len(vec),
                 p=char_thresh
-            ) if texts != self._texts else 0 # p is meaningless if sample=population
+            ) if texts is not self._texts else 0 # p is meaningless if sample=population
             sample_size *= r
+        # DEBUG
+        if not provides_info and motif1 is not None:
+            print('DEBUG: "{}" too similar to "{}"'.format(motif0, motif1))
         return provides_info
     def _get_thresh_by_char(self, texts):
         """Returns the minimum number of characters required per text at
@@ -161,86 +169,6 @@ class MotifGopher:
     def _max_motif_len(self):
         """Returns the length of the longest found motif."""
         return max(len(motif) for motif in self.found_motifs)
-    @memo
-    def _get_correlated(key, other_key, sample_size=100, r=10):
-        """Returns whether the two keys have a max cross-correlation
-        that exceeds MAX_CORR. Rate of any error should be approximately 
-        less than (1 - CONFIDENCE) (because a two-tailed test is used,
-        and sample size is increased by a LARGE factor until either the
-        population is sampled or p-value is below (1 - CONFIDENCE)).
-
-        TODO: Potentially do this in a statistically correct way. Here
-        are two issues in the current implementation:
-        * They take the p-value corresponding to the highest correlation
-        from a series of multiple tests, so the p-value is no longer
-        valid. (This problem is analogous to the problem of
-        "p-hacking.")
-        * The samples are modeled as independent samples of individual
-        substring positions, but they obviously are not: Instead, they
-        are cluster samples because substring positions are "clustered"
-        by the text from which they came. This is a huge problem, but it
-        is hard to fix it without making this algorithm unacceptably
-        slow.
-        * With the displacement associated with cross-correlation, the
-        value of n is no longer well-defined.
-        """
-        p = 1
-        excessively_correlated = False
-        while p >= 1 - self._confidence:
-            texts = random.choices(self._texts, k=sample_size)
-            corr = correlation(
-                arr1    = self._get_motif_vec(key, texts),
-                arr2    = self._get_motif_vec(other_key, texts),
-                padding = self._max_motif_len()
-            )
-            excessively_correlated = corr > self._max_corr
-            if excessively_correlated:
-                p = 2 * (1 - dist.cdf(corr))
-            else:
-                p = 2 * dist.cdf(corr)
-
-    def purge(self, verbose=False):
-        """Purges the found motifs of excessively correlated pairs;
-        includes the longer motif whenever two motifs are excessively
-        correlated. Ties will be broken rather arbitrarily (but
-        deterministically!) by standard string comparison.
-        It is recommended to call this method only once,
-        after collecting a satisfactory number of motifs.
-
-        WARNING: The implementation I have right now is what might be
-        called the "naive implementation." Yes, I am naive: I'm
-        nineteen. So, it's kind of slow, and it takes quadratic time wrt
-        the number of found motifs.
-        """
-        corr_padding = self._max_motif_len()
-        purged = dict()
-        for i, key in enumerate(self.found_motifs.keys()):
-            for other_key in self.found_motifs.keys():
-                if key == other_key:
-                    continue
-                if len(key) > len(other_key):
-                    continue
-                if len(key) == len(other_key) and key > other_key:
-                    continue
-                corr = correlation(
-                    self._get_motif_vec(key),
-                    self._get_motif_vec(other_key),
-                    corr_padding
-                )
-                if corr > self._max_corr:
-                    if verbose:
-                        print('Deleting "{}" because it was too similar to '
-                              '"{}" (similarity: {:.4f})'
-                            .format(key, other_key, corr))
-                    break
-            else:
-                purged[key] = self.found_motifs[key]
-            if verbose:
-                if i % 10 == 0:
-                    print('Searched {}% of the keys...'.format(
-                        100 * i / len(self.found_motifs)
-                    ))
-        self.found_motifs = purged
 
     def log(self, message):
         """Appends MESSAGE to the file .gopherlogs, prefixed with the
@@ -256,19 +184,26 @@ class MotifGopher:
             self._saveto, self._name + '_motifs' + suffix + '.pickle')
         with open(path, 'wb') as dbfile:
             pickle.dump(self.found_motifs, dbfile, pickle.HIGHEST_PROTOCOL)
-    def plot_hunt(self, resolution=50, n=25000):
+    def plot_hunt(self, n=25000, resolution=50):
         """Plots the growth of the number of found motifs relative to
         the number of hunts.
         """
         hunts = []
         num_found = []
+        t0 = time.time()
         for i in range(n):
-            if i % 1000 == 0:
-                print('Hang in there. {}% finished.'.format(100 * i / n))
-            self.hunt()
+            if i % 100 == 0:
+                print('Hang in there. {:.2f}% finished after {:.2f} '
+                      'seconds. {} motifs checked and {} motifs found.'.format(
+                    100 * i / n,
+                    time.time() - t0,
+                    i,
+                    len(self.found_motifs)
+                ))
             if i % resolution == 0:
                 hunts.append(i)
                 num_found.append(len(self.found_motifs))
+            self.hunt()
         plt.plot(hunts, num_found)
         plt.show()
     def run(self, verbose=True):
@@ -295,33 +230,14 @@ class MotifGopher:
             if 'y' in input('Would you like to save and stop hunting for '
                             'motifs? ').lower():
                 break
-        self.save(suffix='_unpurged')
-        if 'y' in input('Would you like to purge motifs that are highly '
-                        'correlated with other motifs of at least the same '
-                        'length? '):
-            self.purge(verbose)
-            print('Saving... ', end='')
-            self.save(suffix='_purged')
-            print('Done.')
+        self.save()
     def __str__(self):
-        return ('MotifGopher instance with thresh={}, max_corr={}, '
+        return ('MotifGopher instance with thresh={}, '
                 'confidence={}, r={}'.format(
-                    self._thresh, self._max_corr, self._confidence, self._r
+                    self._thresh, self._confidence, self._r
         ))
 
 def cross_corr(arr1, arr2, padding):
     """Returns the max cross correlation of ARR1 and ARR2, with a
     displacement of magnitude in the interval [0, PADDING]."""
     return max(np.correlate(np.pad(arr1, padding), arr2))
-def correlation(arr1, arr2, padding):
-    """Returns the cosine of the angle between ARR1 and ARR2, after
-    subjecting one of ARR1 or ARR2 to a displacement (shift) that
-    maximizes its dot product with the other array.
-    """
-    return (
-        cross_corr(arr1, arr2, padding)
-        / ((
-              np.sum(arr1)
-            * np.sum(arr2)
-        )**0.5)
-    )

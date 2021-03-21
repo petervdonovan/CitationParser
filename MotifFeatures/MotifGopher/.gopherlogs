@@ -26,3 +26,35 @@ Gopher_12-45AM_12_Mar_2021: After 500 hunt operations, the number of found motif
 increased by 132 to 132.
 Gopher_12-45AM_12_Mar_2021: After 500 hunt operations, the number of found motifs has
 increased by 81 to 213.
+Gopher_09-51PM_18_Mar_2021: MotifGopher instance with thresh=0.05, confidence=0.99, r=0.75
+Gopher_09-53PM_18_Mar_2021: MotifGopher instance with thresh=0.05, confidence=0.99, r=0.75
+Gopher_09-53PM_18_Mar_2021: MotifGopher instance with thresh=0.05, confidence=0.99, r=0.75
+Gopher_09-53PM_18_Mar_2021: MotifGopher instance with thresh=0.05, confidence=0.99, r=0.75
+Gopher_09-54PM_18_Mar_2021: MotifGopher instance with thresh=0.05, confidence=0.99, r=0.75
+Gopher_09-59PM_18_Mar_2021: MotifGopher instance with thresh=0.05, confidence=0.99, r=0.75
+Gopher_10-01PM_18_Mar_2021: MotifGopher instance with thresh=0.05, confidence=0.99, r=0.75
+Gopher_10-02PM_18_Mar_2021: MotifGopher instance with thresh=0.05, confidence=0.9, r=0.75
+Gopher_10-03PM_18_Mar_2021: MotifGopher instance with thresh=0.05, confidence=0.99, r=0.75
+Gopher_10-04PM_18_Mar_2021: MotifGopher instance with thresh=0.05, confidence=0.2, r=0.75
+Gopher_10-06PM_18_Mar_2021: MotifGopher instance with thresh=0.05, confidence=0.2, r=0.75
+Gopher_10-08PM_18_Mar_2021: MotifGopher instance with thresh=0.05, confidence=0.999, r=0.75
+Gopher_10-18PM_18_Mar_2021: MotifGopher instance with thresh=0.05, confidence=0.99, r=0.75
+Gopher_10-20PM_18_Mar_2021: MotifGopher instance with thresh=0.05, confidence=0.99, r=0.75
+Gopher_10-23PM_18_Mar_2021: MotifGopher instance with thresh=0.01, confidence=0.99, r=0.75
+Gopher_10-25PM_18_Mar_2021: MotifGopher instance with thresh=0.01, confidence=0.99, r=0.75
+Gopher_10-26PM_18_Mar_2021: MotifGopher instance with thresh=0.01, confidence=0.99, r=0.75
+Gopher_10-27PM_18_Mar_2021: MotifGopher instance with thresh=0.01, confidence=0.99, r=0.75
+Gopher_10-33PM_18_Mar_2021: MotifGopher instance with thresh=0.01, confidence=0.99, r=0.75
+Gopher_10-41PM_18_Mar_2021: MotifGopher instance with thresh=0.1, confidence=0.99, r=0.75
+Gopher_10-47PM_18_Mar_2021: MotifGopher instance with thresh=0.1, confidence=0.99, r=0.75
+Gopher_10-47PM_18_Mar_2021: MotifGopher instance with thresh=0.1, confidence=0.99, r=0.75
+Gopher_10-50PM_18_Mar_2021: MotifGopher instance with thresh=0.1, confidence=0.99, r=0.75
+Gopher_10-55PM_18_Mar_2021: MotifGopher instance with thresh=0.1, confidence=0.99, r=0.75
+Gopher_10-56PM_18_Mar_2021: MotifGopher instance with thresh=0.1, confidence=0.99, r=0.75
+Gopher_10-59PM_18_Mar_2021: MotifGopher instance with thresh=0.05, confidence=0.99, r=0.75
+Gopher_11-01PM_18_Mar_2021: MotifGopher instance with thresh=0.15, confidence=0.99, r=0.75
+Gopher_10-56PM_18_Mar_2021: Saved at 17:07 PM, March 19.
+Gopher_10-59PM_18_Mar_2021: saved at 17:15 PM, March 19, 2021.
+Gopher_11-01PM_18_Mar_2021: Saved at 17:16 PM, March 19, 2021.
+Gopher_11-01PM_18_Mar_2021: thresh=0.15, 558 motifs found.
+Gopher_10-59PM_18_Mar_2021: thresh=0.05, 1495 motifs found
