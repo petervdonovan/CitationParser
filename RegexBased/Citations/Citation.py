@@ -1,8 +1,8 @@
 import re
-from Citations.citationRegexes import styleGuideRegexes, \
+from RegexBased.Citations.citationRegexes import styleGuideRegexes, \
                                       nameListRegexes, nameRegexes, \
                                       getParts
-from Utils.regexes import regexes
+from RegexBased.Utils.regexes import regexes
 from People.Name import Name
 import datetime
 
