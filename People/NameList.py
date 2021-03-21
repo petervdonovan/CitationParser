@@ -22,6 +22,9 @@ class NameList:
     def contains(self, name):
         """Returns whether NAME may be represented in SELF."""
         return any(self_name.contains(name) for self_name in self.names)
+    def __str__(self):
+        """Returns a string representation of SELF."""
+        return self.raw
     @classmethod
     def delimited(cls, raw, sep=';', minor_sep=','):
         """Creates a new NameList from RAW, a string in which author
@@ -42,8 +45,9 @@ class NameList:
                 warnings.warn('Warning: One author\'s name apparently '
                       'is not represented with any internal separators.'
                       ' Meaning is unclear.')
-            names.append(Name(
-                surname=parts[0],
-                given_name=minor_sep.join(parts[1:]).strip()
-            ))
+            if parts[0]:
+                names.append(Name(
+                    surname=parts[0],
+                    given_name=minor_sep.join(parts[1:]).strip()
+                ))
         return cls(raw, names)
