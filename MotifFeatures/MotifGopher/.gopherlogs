@@ -62,3 +62,7 @@ Gopher_01-45PM_21_Mar_2021: MotifGopher instance with thresh=0.1, confidence=0.9
 Gopher_01-45PM_21_Mar_2021: MotifGopher instance with thresh=0.1, confidence=0.99, r=0.75
 Gopher_01-49PM_21_Mar_2021: MotifGopher instance with thresh=0.1, confidence=0.99, r=0.75
 Gopher_01-49PM_21_Mar_2021: MotifGopher instance with thresh=0.1, confidence=0.99, r=0.75
+Gopher_01-49PM_21_Mar_2021: After 100000 hunt operations, the number of found motifs has
+increased by 914 to 914.
+Gopher_01-49PM_21_Mar_2021: After 100000 hunt operations, the number of found motifs has
+increased by 1 to 915.
