@@ -8,7 +8,7 @@ import pickle
 from scipy import stats
 import time
 
-from Utils.algs import memo
+from MotifFeatures.Utils.algs import memo
 
 class MotifGopher:
     """I wish to pick out common motifs from an (almost) arbitrarily
