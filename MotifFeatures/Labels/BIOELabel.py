@@ -1,5 +1,5 @@
 from gensim.utils import simple_preprocess
-from Utils.algs import memo
+from MotifFeatures.Utils.algs import memo
 import numpy as np
 
 class BIOELabel:
@@ -7,7 +7,7 @@ class BIOELabel:
     and sequence of named entities to search for.
     """
     def __init__(self, text, entities):
-        """Initializes a BIOSLabel with a raw text TEXT and a sequence
+        """Initializes a BIOELabel with a raw text TEXT and a sequence
         of named entities ENTITIES.
         """
         self._text = text
