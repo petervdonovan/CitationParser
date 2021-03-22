@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 
 class MotifFeature:
     """Encapsulates the machinery required to take strings and give
@@ -17,10 +18,20 @@ class MotifFeature:
         """Return a Series of feature values corresponding to the string
         S.
         """
-        return pd.Series(
-            find_ith(self._motif, s, start, self._i) - start
-            for start in range(len(s))
-        )
+        ret = np.zeros(len(s))
+        current_deltapos = find_ith(self._motif, s, 0, self._i)
+        ret[0] = current_deltapos
+        for start in range(1, len(s)):
+            current_deltapos -= 1
+            if s.startswith(
+                    self._motif,
+                    start if self._i >= 0 else start - 1
+                    ):
+                current_deltapos = (
+                    find_ith(self._motif, s, start, self._i)
+                    - start)
+            ret[start] = current_deltapos
+        return pd.Series(ret)
     def __str__(self):
         return '{}th_"{}"'.format(self._i, self._motif)
 
@@ -33,14 +44,14 @@ def find_ith(search, s, start, i):
     behaves similarly as for the strictly positive integers.
     """
     if i < 0:
-        pos_transform = lambda pos: len(s) - 1 - pos
+        pos_transform = lambda pos: len(s) - pos - len(search)
         return pos_transform(
                 find_ith(
                     search[::-1],
                     s[::-1],
-                    pos_transform(start) + 1,
+                    pos_transform(start - 1),
                     abs(i) - 1)
-            ) - (len(search) - 1)
+            )
     finder = find_after(search, s, start)
     ret = None
     idx = 0
