@@ -1,6 +1,10 @@
+from warnings import warn
+
 from gensim.utils import simple_preprocess
 from MotifFeatures.Utils.algs import memo
 import numpy as np
+
+PREPROC = lambda s: simple_preprocess(s, max_len=float('inf'))
 
 class BIOELabel:
     """Encapsulates logic for generating BIOES labels for a given text
@@ -31,13 +35,20 @@ class BIOELabel:
         ret = [
             ivl for ivl in ret if None not in ivl
         ]
-        assert all(
-            a == b or (
-                (a[0] < a[1] <= b[0]) or (b[0] < b[1] <= a[0])
-            )
-            for a in ret
-            for b in ret
-        ), "Intervals must not overlap."
+        for i in range(len(ret) - 1, -1, -1):
+            a = ret[i]
+            for b in ret:
+                if not (
+                        a == b or (
+                            (a[0] < a[1] <= b[0]) or (b[0] < b[1] <= a[0])
+                        )
+                        for a in ret
+                        for b in ret
+                        ):
+                    warn('Overlapping entity names detected. Ignoring '
+                         'one entity.')
+                    ret.remove(a)
+                    break
         return ret
 
     def _tags_helper(self, condition):
@@ -108,29 +119,38 @@ class BIOELabel:
                 for ivl in intervals
             )
         )
+    def tags(self):
+        """Returns a dictionary containing logical ndarrays for each tag
+        type.
+        """
+        return {
+            'B': self.B_tags(),
+            'I': self.I_tags(),
+            'O': self.O_tags(),
+            'E': self.E_tags()
+        }
 
 def contains(a, b):
     """Returns whether A contains B. (Code snippet adapted from
     https://stackoverflow.com/questions/3847386)
     """
-    a, b = simple_preprocess(a), simple_preprocess(b)
-    for start in range(len(a) - len(b) + 1):
-        for element_idx in range(len(b)):
-            if a[start+element_idx] != b[element_idx]:
-                break
-        else:
-            return True
+    a, b = PREPROC(a), PREPROC(b)
+    if a and b:
+        for start in range(len(a) - len(b) + 1):
+            for element_idx in range(len(b)):
+                if a[start+element_idx] != b[element_idx]:
+                    break
+            else:
+                return True
     return False
 
-def minimal_matching_substring(text, s, preproc=simple_preprocess):
+def minimal_matching_substring(text, s):
     """Returns the start and stop indices of the smallest substring of
     TEXT that matches S. PREPROC is applied to both the substring of
     TEXT and S to determine if they match. Returns None if there is no
     matching substring.
     text - The raw text to be searched
     s    - The string to be searched for
-    preproc - A function that takes in a string and outputs a list of
-              tokens.
     """
     def binary_search(at_least_condition, greater_condition, lo, hi):
         while lo <= hi - 1:

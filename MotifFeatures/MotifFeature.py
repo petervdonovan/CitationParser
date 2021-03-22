@@ -21,6 +21,8 @@ class MotifFeature:
             find_ith(self._motif, s, start, self._i) - start
             for start in range(len(s))
         )
+    def __str__(self):
+        return '{}th_"{}"'.format(self._i, self._motif)
 
 def find_ith(search, s, start, i):
     """Find the position of the ith instance of SEARCH in S at or after
