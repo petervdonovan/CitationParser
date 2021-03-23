@@ -14,9 +14,13 @@ class MotifFeature:
         """
         self._motif = motif
         self._i     = i
+    def __hash__(self):
+        return hash((self._i, self._motif))
+    def __eq__(self, other):
+        return self._i == other._i and self._motif == other._motif
     def featurize(self, s):
-        """Return a Series of feature values corresponding to the string
-        S.
+        """Returns a Series of feature values corresponding to each
+        position in S.
         """
         ret = np.zeros(len(s))
         current_deltapos = find_ith(self._motif, s, 0, self._i)
@@ -32,6 +36,12 @@ class MotifFeature:
                     - start)
             ret[start] = current_deltapos
         return pd.Series(ret)
+    def featurize_all(self, texts):
+        """Returns a Series of the feature values corresponding to each
+        position in each text in TEXTS.
+        """
+        return pd.concat(self.featurize(text) for text in texts)
+
     def __str__(self):
         return '{}th_"{}"'.format(self._i, self._motif)
 
