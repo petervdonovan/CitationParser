@@ -4,12 +4,17 @@ import time
 import random
 import scipy
 import itertools
+import heapq
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import f1_score
 import matplotlib.pyplot as plt
 
 from MotifFeatures.MotifFeature import MotifFeature
-from MotifFeatures.Utils.algs import memo
+from MotifFeatures.PositionFeature import PositionFeature
+
+from MotifFeatures.Utils.algs import memo, rm_inf, set2vec
+
+from MotifFeatures.Utils.stats import t_ci, z_score
 
 random.seed(18)
 
@@ -27,7 +32,6 @@ class UncertainTaggerBuilder:
                 step=5,
                 knn=10,
                 knn_z=3,
-                n_partitions=13,
                 initial_max_separation=1,
                 sort_sample_size=2000):
         """Initialize an UncertainTaggerBuilder with the required
@@ -45,10 +49,6 @@ class UncertainTaggerBuilder:
                 to the K sampled feature sets required to assume that
                 no feature set similar to the K sampled feature sets
                 can exceed the current maximum performance
-        N_PARTITIONS - the number of partitions into which to divide
-                the features when initially ranking them; preferably
-                either 1 (if the dataset is small) or a prime number
-                that is not too small and not too large
         INITIAL_MAX_SEPARATION - the initial number of instances of a
                 motif that can be detected ahead of or behind the
                 current string position
@@ -58,20 +58,20 @@ class UncertainTaggerBuilder:
         self._motifs = list(motifs)
         self._max_size = step
         self._step = step
-        self._motifs.sort(
-            reverse=True,
-            key=lambda motif: sum(
-                1 if motif in text else 0 for text in self._texts
-        ))
+        self._knn = knn
+        self._knn_z = knn_z
+        # This is the best OOB score yet observed.
+        self._max_oob = -float('inf')
         self._features = [
             MotifFeature(motif, i)
             for motif in self._motifs
             for i in range(-initial_max_separation, initial_max_separation)
-        ]
+        ] + [PositionFeature(True), PositionFeature(False)]
         self._model = RandomForestRegressor(
             random_state=random.randint(0, 1000), verbose=1, n_jobs=-1,
-            max_features='sqrt')
-        self._quickmodel = RandomForestRegressor(
+            max_features='sqrt',
+            oob_score=True)
+        quickmodel = RandomForestRegressor(
             random_state=random.randint(0, 1000), verbose=1, n_jobs=-1,
             max_features='sqrt', max_samples=0.2, min_samples_split=8,
             oob_score=True
@@ -86,118 +86,118 @@ class UncertainTaggerBuilder:
         # by an estimate of their importance, and it is crucial for
         # helping the program converge to good answers quickly.
         importances = dict()
+        sample_idx = random.sample(
+            list(range(len(self._texts))),
+            k=min(sort_sample_size, len(self._texts))
+        )
+        sample_texts = [self._texts[i] for i in sample_idx]
+        sample_y = self._y([self._tags[i] for i in sample_idx])
         t0 = time.time()
-        sample_idx = list(range(len(self._texts)))
-        random.shuffle(sample_idx)
-        n = min(sort_sample_size, len(self._texts))
-        sample_texts = [self._texts[i] for i in sample_idx[:n]]
-        sample_y = self._y([self._tags[i] for i in sample_idx[:n]])
-        # It is advisable to reshuffle so that the CV partitions that contain
-        # the texts sampled here do not have an advantage over the others.
-        random.shuffle(sample_idx)
-        self._texts = [self._texts[i] for i in sample_idx]
-        self._tags = [self._tags[i] for i in sample_idx]
-        for a in range(n_partitions):
-            print('{}/{} of the way finished sorting features after {} '
-                  'seconds'.format(a, n_partitions, time.time() - t0))
-            # Because the features have already been sorted by how
-            # common they are, each partition of the features should
-            # be a representative cross section of them. It is also
-            # crucial that 2*INITIAL_MAX_SEPARATION is not a factor of
-            # N_PARTITIONS -- this is one reason why it is best for
-            # N_PARTITIONS to be prime.
-            selected_features = [
-                self._features[i] for i in range(len(self._features))
-                if i % n_partitions == a
-            ]
-            self._quickmodel.fit(
-                self._X(sample_texts, selected_features),
-                sample_y
-            )
-            for i, feature in enumerate(selected_features):
-                importances[feature] = \
-                    self._quickmodel.feature_importances_[i]
+        quickmodel.fit(
+            self._X(sample_texts, self._features),
+            sample_y
+        )
+        print('DEBUG: Time to sort features: {} seconds.'.format(
+            time.time() - t0))
+        for i, feature in enumerate(self._features):
+            importances[feature] = \
+                quickmodel.feature_importances_[i]
         self._features.sort(
             reverse=True,
             key=lambda f: importances[f]
         )
-    def improve(self):
-        """Tests a new group of subsets of the set of all possible
-        features.
+    def _candidate_feature_sets(self):
+        """Returns a list of all feature sets that are currently
+        candidates for testing.
         """
-        featuresets = [
+        return [
             frozenset(feature_tuple)
             for n_features in range(1, self._max_size + 1)
             for feature_tuple in itertools.combinations(
                 self._features[:self._max_size], n_features
             )
-            if frozenset(feature_tuple) not in self._states
+            if ( # If it did not even receive a score, a feature set should be
+                 # reconsidered.
+                frozenset(feature_tuple) not in self._states
+                or self._states[frozenset(feature_tuple)].oob_score is None
+            )
         ]
-        Xs = [
-            self._X(self._texts, featureset, cache='self._texts')
-            for featureset in featuresets
-        ]
-        y = self._y(self._tags)
-        oobs = list()
-        for featureset, X in zip(featuresets, Xs):
-            self._states[featureset] = UTBStatePerformance(
-                self._model.get_params())
-            self._quickmodel.fit(X, y)
-            self._states[featureset].oob_score = self._quickmodel.oob_score_
-            oobs.append(self._quickmodel.oob_score_)
-        # TODO: Avoid looking at all featuresets >>>>>>>>>>
-        cvs = list()
-        for featureset in featuresets:
-            self._states[featureset].cv_score = self._CV(featureset)
-            cvs.append(self._states[featureset].mean_cv())
-        plt.title('CV Scores vs. OOB Scores')
-        plt.xlabel('OOB Score (R^2)')
-        plt.ylabel('CV Score (F1)')
-        plt.scatter(oobs, cvs)
-        plt.show()
-        # <<<<<<<<<<<<<<<<< END TODO <<<<<<<<<<<<<<<<
-        plt.title('OOB Score Distribution for {} Featuresets'.format(
-            len(featuresets)
-        ))
-        plt.xlabel('OOB Score (R^2)')
-        plt.ylabel('Frequency')
-        plt.hist(oobs)
-        plt.show()
-        self._max_size += self._step
-    def _most_similar_feature_sets(self, k, feature_set):
-        """Returns the K most similar feature sets to FEATURE_SET that
-        have CV scores.
+    def improve(self):
+        """Tests a new group of subsets of the set of all possible
+        features.
         """
+        y = self._y(self._tags)
+        for feature_set in self._candidate_feature_sets():
+            X = self._X(self._texts, feature_set, cache='self._texts')
+            if self._is_promising(feature_set):
+                self._states[feature_set] = UTBStatePerformance(
+                    self._model.get_params())
+                self._model.fit(X, y)
+                self._states[feature_set].oob_score = self._model.oob_score_
+                if self._states[feature_set].oob_score >= self._max_oob:
+                    self._max_oob = self._states[feature_set].oob_score
+                    self._states[feature_set].cv_score = self._CV(feature_set)
+                    print('DEBUG: Max OOB score updated to {}'.format(
+                        self._max_oob))
+                    for feature in feature_set:
+                        try:
+                            successor = feature.successor()
+                            if successor not in self._features:
+                                self._features.insert(
+                                    self._max_size, successor)
+                        except AttributeError:
+                            pass # This feature does not support successors.
+            else:
+                print('DEBUG: A feature set did not seem promising.')
+        self._max_size += self._step
+    def _k_most_similar(self, k, feature_set):
+        """Returns the K most similar feature sets to FEATURE_SET that
+        have OOB scores (or all of them if there are fewer of them than
+        K).
+        """
+        # This list "is" a min heap according to the heap ADT defined by
+        # the heapq module.
         pq = []
         poss_features = list(set(
-            feature for feature in fset for fset in self._states
+            feature
+            for other in self._states
+            for feature in other
         ))
-        for fset in self._states:
-            if self._states[fset].cv_score:
-                heappush((scipy.spatial.distance.cosine(
-                    set2vec()
-                ), fset))
+        for other in self._states:
+            if self._states[other].oob_score:
+                # The most similar feature sets will fall to the bottom
+                # because this is a min heap.
+                heapq.heappush(pq, (scipy.spatial.distance.cosine(
+                    set2vec(poss_features, feature_set),
+                    set2vec(poss_features, other)
+                ), other))
+                # The least similar feature sets will swim to the top
+                # and be removed.
+                if len(pq) > k:
+                    heapq.heappop(pq)
+        return [item[1] for item in pq]
+    def _is_promising(self, feature_set):
+        """Returns True iff there is not enough information available to
+        determine that FEATURE_SET does not contain the right features
+        to outperform all other feature sets.
+        """
+        similar = self._k_most_similar(self._knn, feature_set)
+        if len(similar) < self._knn:
+            # There is insufficient information to reject FEATURE_SET
+            return True
+        scores = [self._states[fset].oob_score for fset in similar]
+        return z_score(scores, self._max_oob)
+
 
     def _y(self, tags):
         """Returns the labels as an ndarray."""
         return np.concatenate(list(tags))
     def _X(self, texts, features, cache=None):
         """Returns a design matrix."""
-        data=[
-            list(rm_inf(feature.featurize_all(texts, cache=cache)))
+        return np.concatenate([
+            rm_inf(feature.featurize_all(texts, cache=cache))[:,np.newaxis]
             for feature in features
-        ]
-        data.append([
-            i
-            for text in texts
-            for i in range(len(text))
-        ])
-        data.append([
-            i
-            for text in texts
-            for i in range(len(text)-1, -1, -1)
-        ])
-        return np.array(data).T
+        ], axis=1)
     def _CV(self, features, k=5, confidence=0.95):
         """Return a confidence interval for an f-score for a K-fold
         CV.
@@ -256,36 +256,3 @@ class UTBStatePerformance:
                 'CV score must be a confidence interval.'
             return (self.cv_score[0] + self.cv_score[1]) / 2
         return None
-
-
-def rm_inf(seq):
-    """Returns a copy of SEQ with infinite values replaced with
-    large or small values.
-    """
-    try:
-        minimum = min(val for val in seq if val != -float('inf'))
-        maximum = max(val for val in seq if val != float('inf'))
-    except ValueError:
-        return np.array([0 for _ in range(len(seq))])
-    return np.array([
-        (
-            minimum - 1 if val < minimum
-            else (maximum + 1 if val > maximum else val)
-        ) for val in seq
-    ])
-
-def t_ci(seq, alpha):
-    return scipy.stats.t.interval(
-        alpha, len(seq) - 1, np.average(seq),
-        scipy.stats.sem(seq)
-    )
-
-def set2vec(sequence, subset):
-    """Returns the logical (0/1) vector representation of a subset of
-    SEQUENCE.
-    """
-    ret = np.zeros(len(set))
-    for i, item in enumerate(sequence):
-        if item in subset:
-            ret[i] = 1
-    return ret

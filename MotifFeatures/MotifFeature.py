@@ -49,6 +49,13 @@ class MotifFeature:
         if cache:
             self._cache[cache] = ret
         return ret
+    def successor(self):
+        """Returns a MotifFeature that is similar to SELF but not the
+        same.
+        """
+        if self._i < 0:
+            return MotifFeature(self._motif, self._i-1)
+        return MotifFeature(self._motif, self._i+1)
 
     def __str__(self):
         return '{}th_"{}"'.format(self._i, self._motif)
