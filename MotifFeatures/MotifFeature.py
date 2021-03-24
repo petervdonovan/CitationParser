@@ -14,12 +14,13 @@ class MotifFeature:
         """
         self._motif = motif
         self._i     = i
+        self._cache = dict()
     def __hash__(self):
         return hash((self._i, self._motif))
     def __eq__(self, other):
         return self._i == other._i and self._motif == other._motif
     def featurize(self, s):
-        """Returns a Series of feature values corresponding to each
+        """Returns an array of feature values corresponding to each
         position in S.
         """
         ret = np.zeros(len(s))
@@ -35,12 +36,19 @@ class MotifFeature:
                     find_ith(self._motif, s, start, self._i)
                     - start)
             ret[start] = current_deltapos
-        return pd.Series(ret)
-    def featurize_all(self, texts):
-        """Returns a Series of the feature values corresponding to each
+        return ret
+    def featurize_all(self, texts, cache=None):
+        """Returns an array of the feature values corresponding to each
         position in each text in TEXTS.
+        CACHE - the key that will be used to retrieve the same result
+            from this Feature in the future
         """
-        return pd.concat(self.featurize(text) for text in texts)
+        if cache and cache in self._cache:
+            return self._cache[cache]
+        ret = np.concatenate([self.featurize(text) for text in texts])
+        if cache:
+            self._cache[cache] = ret
+        return ret
 
     def __str__(self):
         return '{}th_"{}"'.format(self._i, self._motif)
