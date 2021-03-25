@@ -34,6 +34,8 @@ NEG_INF_REPLACE = 999
 # assume impossibility. I know this is inelegant, but it saves time.
 EPSILON = 1e-9
 
+SECONDS_PER_MINUTE = 60
+
 random.seed(18)
 
 class UncertainTaggerBuilder:
@@ -49,8 +51,6 @@ class UncertainTaggerBuilder:
                 motifs,
                 a=0.85,
                 n=20,
-                memory=10,
-                reset_n=5,
                 initial_max_separation=1,
                 sort_sample_size=2000):
         """Initialize an UncertainTaggerBuilder with the required
@@ -73,9 +73,7 @@ class UncertainTaggerBuilder:
         self._max_oob = -float('inf')
         self._a = a
         self._n = n
-        self._memory = memory
-        self._reset_n = reset_n
-        self._resets = list()
+        self._guaranteed_n = 0
         self._features = [PositionFeature(True), PositionFeature(False)] + [
             MotifFeature(motif, i)
             for motif in self._motifs
@@ -92,43 +90,35 @@ class UncertainTaggerBuilder:
             oob_score=True
         )
         self._importance_sort(sort_sample_size)
+        # Key invariant: The features with the highest rankings are at
+        # the beginning of the list.
         self._rankings = {
             f : -i for i, f in enumerate(self._features)
         }
         self.scores = list()
-        # Key invariant: The features with the highest rankings are at
-        # the beginning of the list.
+        # Invariant: self._best_feature_set must be in descending order
+        # by importance.
+        self._best_feature_set = self._features
     def _importance_sort(self, sort_sample_size):
         """Sort the features stored in SELF by their importances."""
         quickmodel = RandomForestRegressor(
             random_state=random.randint(0, 1000), verbose=1, n_jobs=-1,
             max_features='sqrt', max_samples=0.2, min_samples_split=8,
             oob_score=True)
-        importances = dict()
         sample_idx = random.sample(
             list(range(len(self._texts))),
             k=min(sort_sample_size, len(self._texts))
         )
         sample_texts = [self._texts[i] for i in sample_idx]
         sample_y = get_y([self._tags[i] for i in sample_idx])
-        t0 = time.time()
         quickmodel.fit(
             get_X(sample_texts, self._features),
             sample_y
         )
-        print('DEBUG: Time to fit to features: {} seconds.'.format(
-            time.time() - t0))
-        t0 = time.time()
-        for i, feature in enumerate(self._features):
-            importances[feature] = \
-                MeanAccumulator(quickmodel.feature_importances_[i])
-        print('DEBUG: Time to get feature importances: {} seconds.'.format(
-            time.time() - t0
-        ))
-        self._features.sort(
-            reverse=True,
-            key=lambda f: importances[f]
-        )
+        self._max_oob = max(self._max_oob, quickmodel.oob_score_)
+        self._features = sort_a_by_b(
+            self._features, quickmodel.feature_importances_)
+
     def _sort(self):
         """Sort the features in descending order by their rankings."""
         self._features.sort(
@@ -138,67 +128,45 @@ class UncertainTaggerBuilder:
     def _get_r(self):
         # This is just the geometric sum formula with the linearity of
         # expectation
-        return 1 - self._a / self._n
-    def _improvement(self):
-        """Return a number that is positive iff it seems like scores
-        might be improving.
-        """
-        if len(self.scores) < self._memory:
-            return 1
-        return scipy.stats.pearsonr(
-            range(self._memory), self.scores[-self._memory:]
-        )[0]
-    def _reset(self):
-        """Reset internal parameters to increase the probability of
-        replicating results that have been positive.
-        """
-        if len(self.scores) < self._reset_n:
-            return
-        min_required_score = sorted(self.scores)[-self._reset_n]
-        sample = [
-            feature_set for feature_set in self._states
-            if self._states[feature_set].oob_score >= min_required_score
-        ]
-        self._resets.append(len(self.scores))
-        # Make future feature sets have about the same length as the
-        # high-performing ones
-        self._n = np.mean([len(feature_set) for feature_set in sample])
-        # Bring the features that commonly appear in high-performing feature
-        # sets to the front of the feature list
-        desirable_features = dict()
-        for feature_set in sample:
-            for feature in feature_set:
-                desirable_features[feature] = \
-                    desirable_features.get(feature, 0) + 1
-        max_ranking = self._rankings[self._features[0]]
-        for feature in desirable_features:
-            self._rankings[feature] = max_ranking + desirable_features[feature]
-        self._sort()
+        return 1 - self._a / (self._n - self._guaranteed_n)
     def _random_candidate_feature_set(self):
-        """Returns a feature set selected from the highest-ranked N
-        features. Does not return a zero-length feature set.
+        """Returns a random feature set of nonzero length.
         """
-        ret = list()
+        ret = self._best_feature_set[:self._guaranteed_n]
         p = self._a
         r = self._get_r()
         i = 0
-        while p >= EPSILON and i < len(self._features):
-            if random.random() < p:
-                ret.append(self._features[i])
-            p *= r
+        while i < len(self._features):
+            if self._features[i] not in ret:
+                if random.random() < p:
+                    ret.append(self._features[i])
+                p *= r
             i += 1
         if len(ret) == 0:
             return self._random_candidate_feature_set()
         return frozenset(ret)
-    def _new_max_oob(self, feature_set):
-        """Carry out the operations that correspond to discovering a new
+    def _new_max_oob(self, ordered_feature_set):
+        """Carries out the operations that correspond to discovering a new
         high-performing feature set. (This is a private helper function
         to IMPROVE.)
+        ORDERED_FEATURE_SET must be in the same order as was used to
+        most recently train the model.
         """
-        self._max_oob = self._states[feature_set].oob_score
+        self._max_oob = self._states[frozenset(ordered_feature_set)].oob_score
+        # Update the ideal length to be that of the high-performing feature
+        # set.
+        self._n = len(ordered_feature_set)
+        # Update the ordered list of best features.
+        feature_importances = self._model.feature_importances_
+        assert len(feature_importances) == len(ordered_feature_set)
+        self._best_feature_set = ordered_feature_set
+        self._best_feature_set = sort_a_by_b(
+            self._best_feature_set, feature_importances
+        )
         print('DEBUG: Max OOB score updated to {}'.format(
             self._max_oob))
-        for feature in feature_set:
+        # Update the current list of features with their successors.
+        for feature in ordered_feature_set:
             successor = None
             try:
                 successor = feature.successor()
@@ -206,26 +174,24 @@ class UncertainTaggerBuilder:
                 pass # This feature does not support successors.
             if successor and successor not in self._features:
                 self._features.append(successor)
-                self._rankings[successor] = self._rankings[feature]
+                self._rankings[successor] = self._rankings[feature] - 1
         self._sort()
     def _update_rankings(self, feature_set, oob_score):
         """Update the rankings for the features in FEATURE_SET according
         to whether the OOB score associated with them is good.
         """
         for f in feature_set:
-            z = z_score(
-                self.scores[max(0, len(self.scores) - self._memory):],
-                oob_score
-            )
-            if np.isfinite(z):
-                self._rankings[f] += z
+            if f not in self._best_feature_set[:self._guaranteed_n]:
+                z = z_score(
+                    self.scores,
+                    oob_score
+                )
+                if np.isfinite(z):
+                    self._rankings[f] += z
         self._sort()
-    def improve(self):
+    def _improve(self):
         """Tests a new subset of the possible features.
         """
-        if self._improvement() <= 0:
-            print('RESETTING because scores are not improving.')
-            self._reset()
         y = get_y(self._tags)
         feature_set = self._random_candidate_feature_set()
         ordered_feature_set = list(feature_set)
@@ -240,6 +206,20 @@ class UncertainTaggerBuilder:
                 self._new_max_oob(feature_set)
             self._update_rankings(feature_set, oob)
             self.scores.append(oob)
+    def run(self, duration):
+        """Improves the feature selection for DURATION minutes."""
+        t0 = time.time()
+        duration_s = duration * SECONDS_PER_MINUTE
+        while self._guaranteed_n < self._n:
+            self._improve()
+            self._guaranteed_n = int(
+                self._n * (time.time() - t0) / duration_s)
+            print('N = {}. Guaranteed N = {}.\nBest OOB = {}.'.format(
+                self._n,
+                self._guaranteed_n,
+                self._max_oob
+            ))
+
 
     def _CV(self, features, k=5, confidence=0.95):
         """Return a confidence interval for an f-score for a K-fold
@@ -313,3 +293,16 @@ def get_X(texts, features, cache=None):
         rm_inf(feature.featurize_all(texts, cache=cache))[:,np.newaxis]
         for feature in features
     ], axis=1)
+def sort_a_by_b(a, b):
+    """Return the A sorted in descending order according to
+    the values in B. (The ith element of B must be the
+    priority level of the ith element of A.)
+    """
+    priorities = dict()
+    for i, element in enumerate(a):
+        priorities[element] = b[i]
+    return sorted(
+        a,
+        reverse=True,
+        key=lambda f: priorities[f]
+    )
