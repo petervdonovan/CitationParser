@@ -18,7 +18,10 @@ class MotifFeature:
     def __hash__(self):
         return hash((self._i, self._motif))
     def __eq__(self, other):
-        return self._i == other._i and self._motif == other._motif
+        try:
+            return self._i == other._i and self._motif == other._motif
+        except AttributeError:
+            return False
     def featurize(self, s):
         """Returns an array of feature values corresponding to each
         position in S.

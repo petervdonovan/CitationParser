@@ -12,9 +12,23 @@ import matplotlib.pyplot as plt
 from MotifFeatures.MotifFeature import MotifFeature
 from MotifFeatures.PositionFeature import PositionFeature
 
-from MotifFeatures.Utils.algs import memo, rm_inf, set2vec
+from MotifFeatures.Utils.algs import memo, set2vec, MeanAccumulator
 
 from MotifFeatures.Utils.stats import t_ci, z_score
+
+from numpy import inf
+
+# Here, positive and negative infinity are mapped to negative and positive
+# 999, respectively. This might seem backwards and counterintuitive, but
+# the reason why this is done is that it is necessary to express that
+# infinity is different from any finite number without actually having
+# to represent infinity. If a series of numbers contains all negative
+# values, including negative infinity, then replacing negative
+# infinity with positive 999 will demonstrate that it is meaningfully
+# different from any other value. I know this is a little inelegant, and
+# I am open to suggestions for better workarounds.
+INF_REPLACE = -999
+NEG_INF_REPLACE = 999
 
 random.seed(18)
 
@@ -30,6 +44,8 @@ class UncertainTaggerBuilder:
                 tags,
                 motifs,
                 step=5,
+                random_step=20,
+                random_step_n=20,
                 knn=10,
                 knn_z=3,
                 initial_max_separation=1,
@@ -58,6 +74,8 @@ class UncertainTaggerBuilder:
         self._motifs = list(motifs)
         self._max_size = step
         self._step = step
+        self._random_step = random_step
+        self._random_step_n = random_step_n
         self._knn = knn
         self._knn_z = knn_z
         # This is the best OOB score yet observed.
@@ -85,30 +103,35 @@ class UncertainTaggerBuilder:
         # just boilerplate. This section of the method sorts the features
         # by an estimate of their importance, and it is crucial for
         # helping the program converge to good answers quickly.
-        importances = dict()
+        self._importances = dict()
         sample_idx = random.sample(
             list(range(len(self._texts))),
             k=min(sort_sample_size, len(self._texts))
         )
         sample_texts = [self._texts[i] for i in sample_idx]
-        sample_y = self._y([self._tags[i] for i in sample_idx])
+        sample_y = get_y([self._tags[i] for i in sample_idx])
         t0 = time.time()
         quickmodel.fit(
-            self._X(sample_texts, self._features),
+            get_X(sample_texts, self._features),
             sample_y
         )
-        print('DEBUG: Time to sort features: {} seconds.'.format(
+        print('DEBUG: Time to fit to features: {} seconds.'.format(
             time.time() - t0))
+        t0 = time.time()
         for i, feature in enumerate(self._features):
-            importances[feature] = \
-                quickmodel.feature_importances_[i]
+            self._importances[feature] = \
+                MeanAccumulator(quickmodel.feature_importances_[i])
+        print('DEBUG: Time to get feature importances: {} seconds.'.format(
+            time.time() - t0
+        ))
         self._features.sort(
             reverse=True,
-            key=lambda f: importances[f]
+            key=lambda f: self._importances[f]
         )
     def _candidate_feature_sets(self):
         """Returns a list of all feature sets that are currently
-        candidates for testing.
+        candidates for testing. (This is a private helper function to
+        IMPROVE.)
         """
         return [
             frozenset(feature_tuple)
@@ -122,31 +145,65 @@ class UncertainTaggerBuilder:
                 or self._states[frozenset(feature_tuple)].oob_score is None
             )
         ]
+    def _random_candidate_feature_sets(self):
+        """Returns a list of RANDOM_STEP_N feature sets of size up to
+        the current max size plus RANDOM_STEP. (This is a private helper
+        function to IMPROVE.)
+        """
+        return [
+            frozenset([
+                feature for feature in
+                self._features[:self._max_size + self._random_step]
+                if random.random() > 0.5
+            ])
+            for _ in range(self._random_step_n)
+        ]
+    def _new_max_oob(self, feature_set):
+        """Carry out the operations that correspond to discovering a new
+        high-performing feature set. (This is a private helper function
+        to IMPROVE.)
+        """
+        self._max_oob = self._states[feature_set].oob_score
+        self._states[feature_set].cv_score = self._CV(feature_set)
+        print('DEBUG: Max OOB score updated to {}'.format(
+            self._max_oob))
+        for feature in feature_set:
+            successor = None
+            try:
+                successor = feature.successor()
+            except AttributeError:
+                pass # This feature does not support successors.
+            if successor and successor not in self._features:
+                self._features.insert(
+                    self._max_size, successor)
+                self._importances[successor] = MeanAccumulator(0)
     def improve(self):
         """Tests a new group of subsets of the set of all possible
         features.
         """
-        y = self._y(self._tags)
-        for feature_set in self._candidate_feature_sets():
-            X = self._X(self._texts, feature_set, cache='self._texts')
-            if self._is_promising(feature_set):
+        y = get_y(self._tags)
+        for feature_set in (self._random_candidate_feature_sets()
+                          + self._candidate_feature_sets()       ):
+            ordered_feature_set = list(feature_set)
+            X = get_X(self._texts, ordered_feature_set, cache='self._texts')
+            if feature_set not in self._states:
                 self._states[feature_set] = UTBStatePerformance(
                     self._model.get_params())
+            if (    (
+                        feature_set not in self._states
+                        # The following line allows states that have been
+                        # deemed not promising to be reassessed.
+                        or not self._states[feature_set].oob_score
+                    )
+                    and self._is_promising(feature_set)
+                    ):
                 self._model.fit(X, y)
+                for idx, importance in enumerate(
+                        self._model.feature_importances_):
+                    self._importances[ordered_feature_set[idx]].add(importance)
                 self._states[feature_set].oob_score = self._model.oob_score_
                 if self._states[feature_set].oob_score >= self._max_oob:
-                    self._max_oob = self._states[feature_set].oob_score
-                    self._states[feature_set].cv_score = self._CV(feature_set)
-                    print('DEBUG: Max OOB score updated to {}'.format(
-                        self._max_oob))
-                    for feature in feature_set:
-                        try:
-                            successor = feature.successor()
-                            if successor not in self._features:
-                                self._features.insert(
-                                    self._max_size, successor)
-                        except AttributeError:
-                            pass # This feature does not support successors.
+                    self._new_max_oob(feature_set)
             else:
                 print('DEBUG: A feature set did not seem promising.')
         self._max_size += self._step
@@ -158,24 +215,31 @@ class UncertainTaggerBuilder:
         # This list "is" a min heap according to the heap ADT defined by
         # the heapq module.
         pq = []
-        poss_features = list(set(
-            feature
-            for other in self._states
-            for feature in other
-        ))
         for other in self._states:
             if self._states[other].oob_score:
-                # The most similar feature sets will fall to the bottom
-                # because this is a min heap.
-                heapq.heappush(pq, (scipy.spatial.distance.cosine(
-                    set2vec(poss_features, feature_set),
-                    set2vec(poss_features, other)
-                ), other))
-                # The least similar feature sets will swim to the top
-                # and be removed.
+                # The most distant features will rise to the top because
+                # this is a min heap. (Note the minus sign.)
+                heapq.heappush(
+                    pq,
+                    (-self._distance(feature_set, other), other)
+                )
+                # The distant features at the top of the heap are then
+                # removed.
                 if len(pq) > k:
                     heapq.heappop(pq)
         return [item[1] for item in pq]
+    def _distance(self, set1, set2):
+        """Return the distance between SET1 and SET2, where both sets
+        are subsets of the set of the first MAX_SIZE + RANDOM_STEP
+        elements.
+        """
+        poss_features = self._features[:self._max_size + self._random_step]
+        return scipy.spatial.distance.cosine(
+            set2vec(poss_features, set1,
+                weights=self._importances),
+            set2vec(poss_features, set2,
+                weights=self._importances)
+        )
     def _is_promising(self, feature_set):
         """Returns True iff there is not enough information available to
         determine that FEATURE_SET does not contain the right features
@@ -186,18 +250,8 @@ class UncertainTaggerBuilder:
             # There is insufficient information to reject FEATURE_SET
             return True
         scores = [self._states[fset].oob_score for fset in similar]
-        return z_score(scores, self._max_oob)
+        return z_score(scores, self._max_oob) <= self._knn_z
 
-
-    def _y(self, tags):
-        """Returns the labels as an ndarray."""
-        return np.concatenate(list(tags))
-    def _X(self, texts, features, cache=None):
-        """Returns a design matrix."""
-        return np.concatenate([
-            rm_inf(feature.featurize_all(texts, cache=cache))[:,np.newaxis]
-            for feature in features
-        ], axis=1)
     def _CV(self, features, k=5, confidence=0.95):
         """Return a confidence interval for an f-score for a K-fold
         CV.
@@ -205,23 +259,23 @@ class UncertainTaggerBuilder:
         f_scores = list()
         for a in range(k):
             self._model.fit(
-                self._X(
+                get_X(
                     [
                         self._texts[i] for i in range(len(self._texts))
                         if i % k == a],
                     features,
                     cache='train partition {}/{}'.format(a, k)
                 ),
-                self._y(
+                get_y(
                     [self._tags[i] for i in range(len(self._texts))
                         if i % k == a]
                 )
             )
-            actual = self._y(
+            actual = get_y(
                 [self._tags[i] for i in range(len(self._texts))
                     if i % k != a]
             )
-            pred = self._model.predict(self._X(
+            pred = self._model.predict(get_X(
                 [self._texts[i] for i in range(len(self._texts))
                     if i % k != a],
                 features,
@@ -256,3 +310,17 @@ class UTBStatePerformance:
                 'CV score must be a confidence interval.'
             return (self.cv_score[0] + self.cv_score[1]) / 2
         return None
+
+def get_y(tags):
+    """Returns the labels as an ndarray."""
+    return np.concatenate(list(tags))
+def get_X(texts, features, cache=None):
+    """Returns a design matrix."""
+    def rm_inf(arr):
+        arr[arr==-inf] = NEG_INF_REPLACE
+        arr[arr==inf]  = INF_REPLACE
+        return arr
+    return np.concatenate([
+        rm_inf(feature.featurize_all(texts, cache=cache))[:,np.newaxis]
+        for feature in features
+    ], axis=1)
