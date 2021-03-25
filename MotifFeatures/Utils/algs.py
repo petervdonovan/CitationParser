@@ -20,28 +20,36 @@ def memo(method):
         return results[args]
     return memoized
 
-def rm_inf(seq):
-    """Returns SEQ with infinite values replaced with large or small
-    values.
-    """
-    try:
-        minimum = min(val for val in seq if val != -float('inf'))
-        maximum = max(val for val in seq if val != float('inf'))
-    except ValueError:
-        return np.array([0 for _ in range(len(seq))])
-    for i, val in enumerate(seq):
-        if val < minimum:
-            seq[i] = minimum - 1
-        elif val > maximum:
-            seq[i] = maximum + 1
-    return seq
+def replace(seq, map):
+    """Replace elements of SEQ that match keys of MAP to the
+    corresponding values and return the result."""
 
-def set2vec(sequence, subset):
-    """Returns the logical (0/1) vector representation of a subset of
-    SEQUENCE.
-    """
+def set2vec(sequence, subset, weights=None):
+    """Returns a vector representation of a subset of SEQUENCE."""
     ret = np.zeros(len(sequence))
     for i, item in enumerate(sequence):
         if item in subset:
-            ret[i] = 1
+            weight = 1
+            if weights:
+                try:
+                    weight = weights[item].mean()
+                except AttributeError:
+                    weight = weights[item]
+            ret[i] = weight
     return ret
+
+class MeanAccumulator:
+    def __init__(self, initial=0):
+        self.sum = initial
+        self.n = 1
+    def add(self, value):
+        self.sum += value
+        self.n += 1
+    def mean(self):
+        return self.sum / self.n
+    def __lt__(self, other):
+        return self.mean() < other.mean()
+    def __gt__(self, other):
+        return self.mean() > other.mean()
+    def __eq__(self, other):
+        return self.mean() == other.mean()
