@@ -136,12 +136,11 @@ class UncertainTaggerBuilder:
         p = self._a
         r = self._get_r()
         i = 0
-        while i < len(self._features):
-            if self._features[i] not in ret:
+        for candidate in self._features:
+            if candidate not in ret:
                 if random.random() < p:
                     ret.append(self._features[i])
                 p *= r
-            i += 1
         if len(ret) == 0:
             return self._random_candidate_feature_set()
         return frozenset(ret)
@@ -190,7 +189,8 @@ class UncertainTaggerBuilder:
                     self._rankings[f] += z
         self._sort()
     def _improve(self):
-        """Tests a new subset of the possible features.
+        """Tests a new subset of the possible features. Returns True iff
+        the operation terminated successfully.
         """
         y = get_y(self._tags)
         feature_set = self._random_candidate_feature_set()
@@ -206,12 +206,19 @@ class UncertainTaggerBuilder:
                 self._new_max_oob(feature_set)
             self._update_rankings(feature_set, oob)
             self.scores.append(oob)
+            return True
+        return False
     def run(self, duration):
         """Improves the feature selection for DURATION minutes."""
         t0 = time.time()
         duration_s = duration * SECONDS_PER_MINUTE
         while self._guaranteed_n < self._n:
-            self._improve()
+            while not self._improve():
+                # If improvement attempt failed, then the set of possible
+                # feature sets that could be tested is probably small;
+                # therefore, more flexibility in feature set selection is
+                # warranted.
+                self._guaranteed_n = max(0, self._guaranteed_n - 1)
             self._guaranteed_n = int(
                 self._n * (time.time() - t0) / duration_s)
             print('N = {}. Guaranteed N = {}.\nBest OOB = {}.'.format(
