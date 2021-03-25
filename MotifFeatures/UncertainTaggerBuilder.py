@@ -135,11 +135,10 @@ class UncertainTaggerBuilder:
         ret = self._best_feature_set[:self._guaranteed_n]
         p = self._a
         r = self._get_r()
-        i = 0
         for candidate in self._features:
             if candidate not in ret:
                 if random.random() < p:
-                    ret.append(self._features[i])
+                    ret.append(candidate)
                 p *= r
         if len(ret) == 0:
             return self._random_candidate_feature_set()
@@ -192,11 +191,11 @@ class UncertainTaggerBuilder:
         """Tests a new subset of the possible features. Returns True iff
         the operation terminated successfully.
         """
-        y = get_y(self._tags)
         feature_set = self._random_candidate_feature_set()
-        ordered_feature_set = list(feature_set)
-        X = get_X(self._texts, ordered_feature_set, cache='self._texts')
         if feature_set not in self._states:
+            ordered_feature_set = list(feature_set)
+            X = get_X(self._texts, ordered_feature_set, cache='self._texts')
+            y = get_y(self._tags)
             self._states[feature_set] = UTBStatePerformance(
                 self._model.get_params())
             self._model.fit(X, y)
