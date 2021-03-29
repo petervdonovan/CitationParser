@@ -28,4 +28,15 @@ in a single step, and then try again.
 
 Or maybe it should just quit after a single step. To begin with, it should quit after a single step. And then I can
 make it simpler and drop the "psuedo" modifier so that the class name is shorter :)
+
+There does not need to be a limit on the amount of weight a GeometricDistributor assigns. In order for the terminating
+WeightAcceptors to be restricted to between 0 and 1, it is only necessary to put constraints on THEM. Make them go
+like 1 - e^(-total_weight), and they will stay in the desired range. And make every GeometricDistributor assign all of
+the weight it is offered and take only the weight that it takes, and it will be fine. Then calculus will only have to
+be done at the top level. What does the top level see? Parameters a, r1, r2, r3. Have r1, r2 vary like 0 -> 1 and 1 -> 0,
+respectively. Have r3 be determined by nthresh, which is defined such that r3^nthresh = 0.5. Vary nthresh like
+nfeatures -> 1. The remaining parameter is a. Do calculus on a. Vary a to get the expected value you want. This will be
+much more efficient if the expected value doesn't CHANGE very quickly. Have the expected value stay fixed at the length
+of the current best, and it will only change sometimes.
+
 """
