@@ -17,4 +17,15 @@ A Distributor can be a WeightAcceptor.
 A GeometricDistributor is a special kind of Distributor. It maintains the invariant that the total amount of weight
 offered to its (i+1)th weight acceptor is differs from the total amount of weight offered to its ith weight
 acceptor by a fixed constant factor that is between zero and one.
+
+Update: In order to ensure that the GeometricDistributor is well-defined, it is necessary to specify one more thing
+-- the most obvious constraint that comes to mind is that it performs its whole action (of distributing) in a single
+step. But that is a difficult constraint to accept...
+
+What I really want is a ProbabilisticPseudoGeometricDistribution, which never assigns weights greater than one. But
+such behavior may make it hard to accomplish much in a single step. What it can do, however, is do as much as it can
+in a single step, and then try again.
+
+Or maybe it should just quit after a single step. To begin with, it should quit after a single step. And then I can
+make it simpler and drop the "psuedo" modifier so that the class name is shorter :)
 """
