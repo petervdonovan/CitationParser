@@ -1,12 +1,13 @@
 import re
 from datetime import datetime
 
-def get_df(title, worksheet=0, has_headers=True):
+def get_df(title, gc, worksheet=0, has_headers=True):
     """Returns a pandas.DataFrame representation of the
     (WORKSHEET)th worksheet of the Google Sheets (GSHEET)
     file that has title TITLE.
 
     TITLE - the title of the desired spreadsheet
+    GC    - the GSpread credentials needed to retrieve the spreadsheet
     WORKSHEET - the index of the desired worksheet within
         the spreadsheet
     HAS_HEADERS - set to False if the spreadsheet does not
