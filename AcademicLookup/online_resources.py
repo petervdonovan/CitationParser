@@ -136,7 +136,8 @@ class GoogleBooksSearch(Search):
         return self._get_volume_info('language')
 
     def publication_year(self):
-        return get_year(self._get_volume_info('publishedDate'))
+        y = self._get_volume_info('publishedDate')
+        return get_year(y) if isinstance(y, str) else y
     
     def google_books_link(self):
         """Returns a link to a Google Books page with details about the
